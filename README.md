@@ -13,3 +13,4 @@ The first milestone is an Electron window with a village map, camera controls, c
 `backend/scripts/` contains the existing Cognism exporter, Outlook drafter, and Salesforce account exporter. These were inspected as source text and remain unchanged. Live automation is outside setup and Phase 1; Salesforce integration is outside V1.
 
 Runtime contact files, browser profiles, credentials, and progress logs belong outside the source tree and must never be committed. The repository includes ignore rules for these artifacts.
+# Tachy-On-Village
