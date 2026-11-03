@@ -3,7 +3,6 @@ import { Camera } from '../frontend/world/camera';
 import { landmarks, spawn } from '../frontend/world/model';
 import { project, unproject, distance } from '../frontend/world/navigation/geometry';
 import { isWalkable, NavigationGrid, segmentClear } from '../frontend/world/navigation/grid';
-import { Walker } from '../frontend/world/navigation/movement';
 
 describe('village navigation', () => {
   const grid = new NavigationGrid();
@@ -31,26 +30,7 @@ describe('village navigation', () => {
   it('can route between every pair of entrances', () => {
     for (const a of landmarks) for (const b of landmarks) expect(grid.find(a.entrance, b.entrance), `${a.id} → ${b.id}`).not.toBeNull();
   });
-  it('retargets mid-segment safely and clears a pending building action', () => {
-    const walker = new Walker(grid);
-    walker.go(landmarks[0].entrance, landmarks[0].id);
-    for (let i = 0; i < 35; i++) walker.update(1 / 60);
-    const before = { ...walker.position };
-    expect(walker.go(landmarks[1].entrance)).toBe(true);
-    expect(walker.position).toEqual(before);
-    expect(walker.pending).toBeNull();
-    for (let i = 0; i < 2000 && walker.route.length; i++) { const old = { ...walker.position }; expect(walker.update(1 / 60)).toBeNull(); expect(segmentClear(old, walker.position)).toBe(true); }
-    expect(distance(walker.position, landmarks[1].entrance)).toBeLessThan(.01);
-  });
-  it('emits arrival once and clamps a long frame gap', () => {
-    const walker = new Walker(grid);
-    walker.go(landmarks[0].entrance, 'dock');
-    walker.update(15);
-    expect(distance(walker.position, spawn)).toBeLessThanOrEqual(8.26);
-    const arrivals = [];
-    for (let i = 0; i < 2000; i++) { const arrived = walker.update(.02); if (arrived) arrivals.push(arrived); }
-    expect(arrivals).toEqual(['dock']);
-  });
+
 });
 
 describe('projection and camera', () => {

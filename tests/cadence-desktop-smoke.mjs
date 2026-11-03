@@ -1,0 +1,165 @@
+import { _electron as electron } from 'playwright';
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve, join } from 'node:path';
+import { createHash } from 'node:crypto';
+
+// Only invented data in a temporary library. Never reads the user's cadence records.
+const temporary = await mkdtemp(join(tmpdir(), 'tachyon-menu-test-'));
+const artifacts = resolve('artifacts');
+await mkdir(artifacts, { recursive: true });
+const scripts = ['cognism_exporter.py', 'account_exporter.py', 'outlook_drafter.py'];
+const checksum = async name => createHash('sha256').update(await readFile(join('backend/scripts', name))).digest('hex');
+const before = await Promise.all(scripts.map(checksum));
+const env = { ...process.env, TACHYON_DATA_ROOT: join(temporary, 'Tachyon') };
+delete env.ELECTRON_RUN_AS_NODE;
+delete env.ELECTRON_RENDERER_URL;
+let desktop;
+let page;
+try {
+  desktop = await electron.launch({ args: [resolve('out/main/index.js'), `--user-data-dir=${join(temporary, 'profile')}`], env, chromiumSandbox: true, timeout: 30000 });
+  page = await desktop.firstWindow();
+  page.setDefaultTimeout(15000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.getByRole('navigation', { name: 'Main menu' }).waitFor();
+  assert.equal(await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button').count(), 5);
+  assert.equal(await page.locator('canvas').count(), 0);
+  assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
+  const security = await desktop.evaluate(({ BrowserWindow }) => {
+    const prefs = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();
+    return { contextIsolation: prefs.contextIsolation, sandbox: prefs.sandbox, nodeIntegration: prefs.nodeIntegration, webSecurity: prefs.webSecurity };
+  });
+  assert.deepEqual(security, { contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true });
+  await page.screenshot({ path: join(artifacts, 'menu-desktop.png') });
+  for (const label of ['Cognism', 'Emails']) {
+    const button = page.getByRole('button', { name: new RegExp('^' + label) });
+    await button.click();
+    await page.getByRole('dialog', { name: 'Coming Soon' }).waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    assert.equal(await button.evaluate(element => element === document.activeElement), true);
+  }
+  await page.getByRole('button', { name: 'Existing Cadences' }).click();
+  await page.getByRole('heading', { name: 'Your first cadence starts here.' }).waitFor();
+  await page.getByText('Cadence folder', { exact: true }).click();
+  assert.ok((await page.locator('.workspace-footer details').innerText()).includes(env.TACHYON_DATA_ROOT));
+  await page.screenshot({ path: join(artifacts, 'cadence-empty.png') });
+  await page.getByRole('button', { name: '+ Create New Cadence', exact: true }).first().click();
+  await page.getByRole('dialog', { name: 'Create New Cadence' }).waitFor();
+  assert.equal(await page.getByLabel('Cadence name', { exact: true }).evaluate(element => element === document.activeElement), true);
+  await page.getByLabel('Cadence name', { exact: true }).fill('../escape');
+  await page.getByRole('button', { name: 'Create Cadence →', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'Start with a letter' }).waitFor();
+  await page.getByLabel('Cadence name', { exact: true }).fill('Example Cadence');
+  await page.screenshot({ path: join(artifacts, 'cadence-create.png') });
+  await page.getByRole('button', { name: 'Create Cadence →', exact: true }).click();
+  await page.getByRole('heading', { name: 'Example Cadence', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Accounts', exact: true }).waitFor();
+  const folder = join(env.TACHYON_DATA_ROOT, 'Cadences', 'Example Cadence');
+  assert.deepEqual((await readdir(folder)).sort(), ['Accounts', 'Contacts', 'Storage']);
+  await page.screenshot({ path: join(artifacts, 'cadence-dashboard-empty.png') });
+  await page.getByRole('button', { name: '+ Add Accounts', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add Salesforce Accounts' }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '+ Import Contacts', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Import Cognism Contacts' }).waitFor();
+  assert.equal((await page.evaluate(() => window.villageDesktop.jobs.current())).data, null);
+  await page.keyboard.press('Escape');
+  for (const label of ['+ Draft Emails']) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await page.getByRole('dialog', { name: 'Prepare Outlook Drafts' }).waitFor();
+    await page.getByRole('alert').filter({ hasText: 'Import contacts' }).waitFor();
+    await page.keyboard.press('Escape');
+  }
+  await page.getByRole('button', { name: 'Next Steps', exact: true }).click();
+  await page.getByText('No next steps recorded.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await page.getByRole('button', { name: 'Existing Cadences', exact: true }).click();
+  await page.getByRole('button', { name: '+ Create New Cadence', exact: true }).click();
+  await page.getByLabel('Cadence name', { exact: true }).fill('example cadence');
+  await page.getByRole('button', { name: 'Create Cadence →', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'already exists' }).waitFor();
+  await page.keyboard.press('Escape');
+  const traversal = await page.evaluate(() => window.villageDesktop.cadences.read('../escape'));
+  assert.equal(traversal.ok, false);
+  const badPayload = await page.evaluate(() => window.villageDesktop.cadences.create({ name: 'Bad payload' }));
+  assert.equal(badPayload.ok, false);
+  const badLink = await page.evaluate(() => window.villageDesktop.cadences.openSalesforceLink('file:///etc/passwd'));
+  assert.equal(badLink.ok, false);
+  console.log('Five-button menu, empty library, creation, duplicate/traversal validation, keyboard dialogs, secure bridge and honest stubs: passed.');
+
+  // Populate only the test-owned library with invented records and one explicit event.
+  const today = new Date();
+  const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  await writeFile(join(folder, 'Accounts', 'Example Cadence_accounts.csv'), 'Account Name,Salesforce URL\nExample Company,https://example.my.salesforce.com/demo\n');
+  await writeFile(join(folder, 'Contacts', 'Example Cadence_contacts.csv'), 'Name,Company,Job Title\nAlex Example,Example Company,Researcher\n');
+  await writeFile(join(folder, 'Storage', 'Example Cadence_outreach.json'), JSON.stringify({ outreach: [{ contact: 'Alex Example', sent: false, replied: false }], events: [{ title: 'Example planning session', date, contact: 'Alex Example' }] }));
+  await page.getByRole('button', { name: /CADENCE 01 Example Cadence/ }).click();
+  await page.getByRole('cell', { name: 'Alex Example', exact: true }).first().waitFor();
+  await page.getByRole('cell', { name: 'Unknown', exact: true }).waitFor();
+  assert.equal(await page.getByRole('cell', { name: 'No', exact: true }).count(), 1);
+  await page.screenshot({ path: join(artifacts, 'cadence-dashboard-data.png') });
+  for (const [width, height] of [[1366, 768], [900, 650]]) {
+    await desktop.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), [width, height]);
+    await page.waitForFunction(size => window.innerWidth === size[0] && window.innerHeight === size[1], [width, height]);
+    assert.equal(await page.locator('.desktop-app').evaluate(element => element.scrollWidth > element.clientWidth), false);
+    await page.screenshot({ path: join(artifacts, `cadence-${width}x${height}.png`) });
+  }
+  await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 900));
+  await page.getByRole('button', { name: 'Main menu', exact: true }).click();
+  await page.getByRole('button', { name: 'Calendar', exact: false }).click();
+  await page.getByText('Example planning session', { exact: true }).waitFor();
+  assert.equal(await page.locator('.calendar-event').count(), 1);
+  await page.screenshot({ path: join(artifacts, 'cadence-global-calendar.png') });
+  await page.getByRole('button', { name: 'Next month', exact: true }).click();
+  await page.getByText('No recorded events this month.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await page.getByText('Example planning session', { exact: true }).waitFor();
+  await page.reload();
+  await page.getByRole('button', { name: 'Existing Cadences' }).click();
+  await page.getByRole('button', { name: /CADENCE 01 Example Cadence/ }).waitFor();
+  await page.getByRole('button', { name: /CADENCE 01 Example Cadence/ }).click();
+  await page.getByRole('button', { name: 'Next Steps', exact: true }).click();
+  await page.getByRole('button', { name: '+ Add next step', exact: true }).click();
+  await page.getByLabel('Activity', { exact: true }).selectOption('linkedin');
+  await page.getByLabel('Title', { exact: true }).fill('Synthetic introduction');
+  await page.getByLabel('Date', { exact: true }).fill(date);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit next steps', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit Synthetic introduction', exact: true }).click();
+  await page.getByLabel('Activity', { exact: true }).selectOption('call');
+  await page.getByLabel('Title', { exact: true }).fill('Synthetic call');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await page.locator('.calendar-event').filter({ hasText: 'Synthetic call' }).waitFor();
+  assert.equal(await page.getByLabel('Call', { exact: true }).count(), 1);
+  await page.getByRole('button', { name: 'Edit contacts', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit Alex Example', exact: true }).click();
+  await page.getByLabel('Position', { exact: true }).fill('Director');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('cell', { name: 'Director', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit accounts', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete Example Company', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm delete', exact: true }).click();
+  await page.getByText('No accounts yet', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Next Steps', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete Synthetic call', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm delete', exact: true }).click();
+  await page.getByRole('button', { name: '+ Add next step', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Delete Synthetic call', exact: true }).waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: 'Delete cadence', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm delete', exact: true }).click();
+  await page.getByText('Your first cadence starts here.', { exact: true }).waitFor();
+  console.log('Next-step creation/edit/delete, activity icon, contact edit, account deletion and cadence archive UI: passed.');
+  assert.deepEqual(await Promise.all(scripts.map(checksum)), before);
+  assert.deepEqual(errors, []);
+  console.log('CSV/JSON data, recorded-only calendar, month controls, resize, reload persistence, and all three unchanged Python scripts: passed.');
+} catch (error) {
+  if (page) await page.screenshot({ path: join(artifacts, 'cadence-desktop-failure.png') }).catch(() => {});
+  throw error;
+} finally {
+  if (desktop) await desktop.close();
+  await rm(temporary, { recursive: true, force: true });
+}

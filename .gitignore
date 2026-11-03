@@ -48,9 +48,16 @@ credentials*.json
 *.db-*
 user_data/
 runtime_data/
+Tachyon/Cadences/
 imports/
 exports/
 checkpoints/
+*.partial
+.accounts-merge.lock
+.contacts-merge.lock
+.contacts-*.tmp
+.accounts-*.tmp
+.tachyon-worker.lock
 
 # Authenticated browser sessions and storage
 browser_profiles/
@@ -89,3 +96,16 @@ artifacts/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Outlook durable attempt history and private draft requests
+attempts.json
+.attempts-*.tmp
+draft-request.json
+
+# Deleted cadences and manually scheduled next steps
+.cadence-bin/
+*_steps.json
+.edit-*.tmp
+.steps-edit.lock
+
+*_replies.json

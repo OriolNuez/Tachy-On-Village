@@ -16,6 +16,11 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:desktop": "npm run build && node tests/desktop-smoke.mjs",
+    "test:cadences": "npm run build && node tests/cadence-desktop-smoke.mjs",
+    "test:jobs": "npm run build && node tests/jobs-desktop-smoke.mjs",
+    "test:cognism": "npm run build && node tests/cognism-desktop-smoke.mjs",
+    "test:outlook": "npm run build && node tests/outlook-desktop-smoke.mjs",
+    "test:python": "node tests/run-python-tests.mjs",
     "check": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {

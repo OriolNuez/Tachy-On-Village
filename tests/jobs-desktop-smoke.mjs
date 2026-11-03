@@ -1,0 +1,76 @@
+import { _electron as electron } from 'playwright';
+import { build } from 'vite';
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve, join } from 'node:path';
+
+const root = resolve('.');
+const temporary = await mkdtemp(join(tmpdir(), 'tachyon-jobs-ui-'));
+const artifacts = resolve('artifacts');
+await mkdir(artifacts, { recursive: true });
+const cadence = join(temporary, 'Tachyon', 'Cadences', 'Synthetic Test');
+for (const group of ['Accounts', 'Contacts', 'Storage']) await mkdir(join(cadence, group), { recursive: true });
+const accountFile = join(cadence, 'Accounts', 'Synthetic Test_accounts.csv');
+const original = '\uFEFFAccount Name,Salesforce Account ID,Salesforce URL,Notes\r\nKeep original name,001000000000001,https://example.my.salesforce.com/one,Keep this note\r\n';
+await writeFile(accountFile, original);
+const sourceScripts = ['account_exporter.py', 'cognism_exporter.py', 'outlook_drafter.py'];
+const sources = await Promise.all(sourceScripts.map(name => readFile(join(root, 'backend/scripts', name), 'utf8')));
+let desktop, page;
+try {
+  await build({ configFile: false, logLevel: 'error', build: { ssr: true, outDir: join(temporary, 'harness'), rollupOptions: { input: join(root, 'tests/fixtures/jobs-desktop-main.ts'), external: ['electron'], output: { entryFileNames: 'index.mjs' } } } });
+  const env = { ...process.env, TACHYON_TEST_REPO: root, TACHYON_DATA_ROOT: join(temporary, 'Tachyon') };
+  delete env.ELECTRON_RUN_AS_NODE;
+  desktop = await electron.launch({ args: [join(temporary, 'harness/index.mjs'), `--user-data-dir=${join(temporary, 'profile')}`], env, chromiumSandbox: true });
+  page = await desktop.firstWindow(); page.setDefaultTimeout(15000);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.getByRole('button', { name: 'Existing Cadences' }).click();
+  await page.evaluate(() => {
+    const badge = document.createElement('p');
+    badge.textContent = 'AUTOMATED TEST · SYNTHETIC DATA · NO LIVE BROWSER';
+    Object.assign(badge.style, { position: 'fixed', bottom: '10px', left: '10px', zIndex: '100', padding: '8px', background: '#f5d97c', color: '#171722', font: '11px monospace' });
+    document.body.append(badge);
+  });
+  await page.getByRole('button', { name: /CADENCE 01 Synthetic Test/ }).click();
+  await page.getByRole('button', { name: '+ Add Accounts', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add Salesforce Accounts' }).waitFor();
+  await page.screenshot({ path: join(artifacts, 'salesforce-confirmation-synthetic.png') });
+  assert.equal((await page.evaluate(() => window.villageDesktop.jobs.current())).data, null);
+  await page.getByRole('button', { name: 'Launch Salesforce', exact: true }).click();
+  await page.getByRole('button', { name: 'Ready to Export', exact: true }).waitFor();
+  assert.equal(await readFile(accountFile, 'utf8'), original);
+  await page.screenshot({ path: join(artifacts, 'salesforce-ready-synthetic.png') });
+  const busy = await page.evaluate(() => window.villageDesktop.jobs.startSalesforce('Synthetic Test'));
+  assert.equal(busy.ok, false);
+  await page.getByRole('button', { name: 'Ready to Export', exact: true }).click();
+  await page.getByRole('button', { name: 'Close Browser', exact: true }).waitFor();
+  assert.equal(await readFile(accountFile, 'utf8'), original);
+  await page.screenshot({ path: join(artifacts, 'salesforce-export-synthetic.png') });
+  await page.getByRole('button', { name: 'Close Browser', exact: true }).click();
+  await page.locator('.job-status span').filter({ hasText: /^completed$/ }).waitFor();
+  const result = (await page.evaluate(() => window.villageDesktop.jobs.current())).data;
+  assert.deepEqual(result.counts, { found: 4, exported: 2, duplicates: 1, errors: 1 });
+  assert.deepEqual(result.result, { added: 1, duplicates: 2, total: 2 });
+  await page.getByRole('region', { name: 'Error reviewer' }).waitFor();
+  await page.screenshot({ path: join(artifacts, 'salesforce-complete-synthetic.png') });
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('cell', { name: 'Example New', exact: true }).waitFor();
+  const saved = await readFile(accountFile, 'utf8');
+  assert.ok(saved.startsWith(original));
+  assert.ok(saved.includes('Example New')); assert.ok(saved.includes('Keep this note'));
+  await page.getByRole('button', { name: '+ Add Accounts', exact: true }).click();
+  await page.getByRole('button', { name: 'Launch Salesforce', exact: true }).click();
+  await page.getByRole('button', { name: 'Ready to Export', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Cancel task', exact: true }).click();
+  await page.locator('.job-status span').filter({ hasText: /^cancelled$/ }).waitFor();
+  assert.equal(await readFile(accountFile, 'utf8'), saved);
+  assert.deepEqual(await Promise.all(sourceScripts.map(name => readFile(join(root, 'backend/scripts', name), 'utf8'))), sources);
+  assert.deepEqual(errors, []);
+  console.log('TEST FIXTURE ONLY: real Electron → Python adapter with fake Playwright: confirmation, prompts, streaming, profile exclusion, atomic merge, table refresh, error reviewer and cancellation passed.');
+} catch (error) {
+  if (page) await page.screenshot({ path: join(artifacts, 'salesforce-test-failure.png') }).catch(() => {});
+  throw error;
+} finally {
+  if (desktop) await desktop.close();
+  await rm(temporary, { recursive: true, force: true });
+}

@@ -13,6 +13,7 @@ import csv
 import re
 import time
 from pathlib import Path
+from typing import Callable, Dict, Optional
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 HEADERS = ["Name", "Job Title", "Company", "Company Domain", "LinkedIn URL",
@@ -175,19 +176,30 @@ def advance_page(page, previous_signature):
     return False
 
 
-def main(args):
+def main(args: argparse.Namespace, *, prompt: Callable[[str], object] = input,
+         check_cancel: Callable[[], None] = lambda: None,
+         progress: Optional[Callable[[int, Dict[str, int]], None]] = None,
+         preserve_rows: bool = False) -> Dict[str, int]:
     records, seen, visited = [], set(), set()
+    counts = dict(found=0, exported=0, duplicates=0, errors=0,
+                  verifiedEmails=0, diamond=0, missingEmails=0)
+    def report() -> None:
+        if progress:
+            progress(counts['found'], dict(counts))
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(Path(args.profile_dir).expanduser()),
             channel='chrome', headless=False)
-        page = context.pages[0] if context.pages else context.new_page()
-        page.goto('https://app.cognism.com/', wait_until='domcontentloaded')
-        print('Open your Cognism saved list in this Chrome window.')
-        input('Press Enter when you can see the contact rows: ')
         try:
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto('https://app.cognism.com/', wait_until='domcontentloaded')
+            print('Open your Cognism saved list in this Chrome window.')
+            prompt('Press Enter when you can see the contact rows: ')
+            check_cancel()
+            report()
             number = 1
             while number <= args.max_pages:
+                check_cancel()
                 rows = visible_rows(page)
                 try:
                     rows.first.wait_for(state='visible', timeout=15000)
@@ -207,25 +219,45 @@ def main(args):
                 visited.add(signature)
                 count = rows.count()
                 for i in range(count):
+                    check_cancel()
+                    counts["found"] += 1
                     try:
                         record = parse_row(visible_rows(page).nth(i))
                         if not record:
+                            counts["errors"] += 1
+                            report()
                             continue
                         identity = (record['Name'], record['Company'])
-                        if identity not in seen:
+                        if preserve_rows or identity not in seen:
                             seen.add(identity)
                             records.append(record)
+                            counts['exported'] += 1
+                        else:
+                            counts['duplicates'] += 1
+                        if not record['Email'].strip():
+                            counts['missingEmails'] += 1
+                        if record['Email Verified'] == 'Yes':
+                            counts['verifiedEmails'] += len(record['Email'].split(' | ')) if record['Email'] else 0
+                        if record['Diamond Verified'] == 'Yes':
+                            counts['diamond'] += 1
                         print(f'Page {number}, row {i+1}/{count}: {record["Name"]} '
                               f'email={bool(record["Email"])} phone={any(record[k] for k in ("Mobile Phone", "HQ Phone", "Direct Phone", "Other Phone"))} diamond={record["Diamond Verified"]}')
                     except Exception as exc:
+                        counts['errors'] += 1
                         print(f'Page {number}, row {i+1}: error reading row: {exc}')
+                    report()
+                check_cancel()
                 save(records, args.output)
                 if number == args.max_pages or not advance_page(page, signature):
                     break
                 number += 1
+            check_cancel()
+            return counts
         finally:
-            save(records, args.output)
-            context.close()
+            try:
+                save(records, args.output)
+            finally:
+                context.close()
 
 
 if __name__ == '__main__':

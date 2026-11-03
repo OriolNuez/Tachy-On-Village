@@ -14,5 +14,5 @@
     "noUnusedParameters": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["electron", "frontend", "tests/**/*.ts", "*.config.ts"]
+  "include": ["electron", "frontend", "shared", "tests/**/*.ts", "*.config.ts"]
 }

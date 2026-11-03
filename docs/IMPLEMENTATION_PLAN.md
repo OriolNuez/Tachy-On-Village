@@ -1,5 +1,7 @@
 # Tachy-on Village — architecture and implementation plan
 
+> **Current scope, 3 November 2026:** following the button-based UI, the user explicitly authorized Salesforce account integration. [Salesforce integration](SALESFORCE_INTEGRATION.md) records the runner, adapter, file merge and validation plan; this supersedes the earlier Salesforce exclusion. [Cadence UI Phase 1](CADENCE_UI.md) records the existing UI and file contracts. Data stays in repository-local `Tachyon/Cadences/`; profiles and intermediate jobs use OS app-data. The village, map and movement are preserved. The subsequent authorized [Cognism contact integration](COGNISM_INTEGRATION.md) extends the existing job runner with an allowlisted adapter and atomic contact merges. The subsequent authorized [Outlook integration](OUTLOOK_INTEGRATION.md) adds reviewed draft batches and durable attempt history through the same runner; its standalone script remains unchanged. The proposal below is historical context.
+
 Prepared 23 October 2026 from the complete `Tachy-on_Village_PRD.md` and the current workspace. This is a proposal; application implementation starts only after the user approves Phase 1.
 
 ## 1. Repository findings
