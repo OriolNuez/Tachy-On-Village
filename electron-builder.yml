@@ -1,0 +1,30 @@
+appId: com.tachyon.village
+productName: Tachy-on Village
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: backend
+    to: backend
+    filter:
+      - scripts/*.py
+      - workers/*.py
+asar: true
+npmRebuild: false
+mac:
+  target:
+    - target: zip
+      arch: [arm64]
+  category: public.app-category.productivity
+  identity: null
+  artifactName: Tachy-on-Village-${version}-mac-${arch}.${ext}
+win:
+  target:
+    - target: portable
+      arch: [x64]
+  signAndEditExecutable: false
+  artifactName: Tachy-on-Village-${version}-windows-${arch}.${ext}
+portable:
+  requestExecutionLevel: user

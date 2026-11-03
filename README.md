@@ -111,3 +111,20 @@ Next steps are saved locally in `Storage/<name>_steps.json`. There is no automat
 Outreach uses the drafted-email list for tracking; the Sent column is removed. Use **✎** in the draft section to tick or untick **Replied** for an individual email. Reply marks persist per draft attempt in `Storage/<name>_replies.json` and appear in the section’s reply count. They are manual records, not Outlook detection; draft creation does not write a sent status.
 
 Ticked emails also appear in the **Replied** section below the draft list, with contact, subject and cadence step. The same search and subject/step filters apply to both lists. Unticking an email removes it from Replied.
+
+## Desktop packages
+
+Build distributable launchers with:
+
+```sh
+npm run package:mac   # Apple Silicon macOS .app inside release/mac-arm64/ and a ZIP
+npm run package:win   # Windows x64 portable .exe
+```
+
+Outputs are under `release/` (ignored by Git). Double-click **Tachy-on Village.app** on macOS; it can be moved to Applications. On Windows, open **Tachy-on-Village-0.1.0-windows-x64.exe**. These packages contain Electron, the built UI and the six Python source scripts/workers, but no contacts, browser profiles or credentials. Node/npm are not required to open them.
+
+The packaged app stores cadence files in **Documents/Tachyon/Cadences** and reads message templates from **Documents/Tachyon/messaging**. To bring existing data across, close both versions and copy the repository's cadence folders and message templates to these locations without replacing existing folders. Browser profiles and draft-attempt history remain in Electron's OS app-data directory.
+
+Python 3 with the `playwright` Python package and Google Chrome are still needed for browser automation. Python must be available as `python` on Windows or `python3` on macOS, or configured through `TACHYON_PYTHON` in the launching environment. Packaging does not execute any automation or install Python dependencies.
+
+These are local unsigned builds, not notarized/signed releases. OS security prompts may appear; enterprise policies still apply. Windows execution and live browser automation need testing on the target computer.
